@@ -1,0 +1,192 @@
+From f35fb30e69e640b119762059aa2f0f7224287cf8 Mon Sep 17 00:00:00 2001
+From: Kashif Khan <kashifkhan@microsoft.com>
+Date: Mon, 3 Jun 2024 22:07:34 +0000
+Subject: [PATCH 1/6] fix debug log msg
+
+---
+ .../azure/servicebus/_common/auto_lock_renewer.py               | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/sdk/servicebus/azure-servicebus/azure/servicebus/_common/auto_lock_renewer.py b/sdk/servicebus/azure-servicebus/azure/servicebus/_common/auto_lock_renewer.py
+index a8b706dac3965..98c910fae81f2 100644
+--- a/sdk/servicebus/azure-servicebus/azure/servicebus/_common/auto_lock_renewer.py
++++ b/sdk/servicebus/azure-servicebus/azure/servicebus/_common/auto_lock_renewer.py
+@@ -293,7 +293,7 @@ def register(
+             )
+ 
+         _log.debug(
+-            "Running lock auto-renew for %r for %r seconds", renewable, max_lock_renewal_duration
++            "Running lock auto-renew for %r for %r seconds", renewable, max_lock_renewal_duration or self._max_lock_renewal_duration
+         )
+ 
+         self._init_workers()
+
+From 02aa04ffaf13deed04ce3c2600646d078792e2c7 Mon Sep 17 00:00:00 2001
+From: Kashif Khan <kashifkhan@microsoft.com>
+Date: Mon, 3 Jun 2024 22:08:11 +0000
+Subject: [PATCH 2/6] add a client_ready check in mgmt_request so that token
+ refreshes can happen
+
+---
+ .../azure-servicebus/azure/servicebus/_pyamqp/client.py        | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/sdk/servicebus/azure-servicebus/azure/servicebus/_pyamqp/client.py b/sdk/servicebus/azure-servicebus/azure/servicebus/_pyamqp/client.py
+index 468161d47b946..32eec588cf2a4 100644
+--- a/sdk/servicebus/azure-servicebus/azure/servicebus/_pyamqp/client.py
++++ b/sdk/servicebus/azure-servicebus/azure/servicebus/_pyamqp/client.py
+@@ -463,6 +463,9 @@ def mgmt_request(
+                 self._mgmt_links[node] = mgmt_link
+                 mgmt_link.open()
+ 
++        while not self.client_ready():
++            time.sleep(0.05)
++
+         while not mgmt_link.ready():
+             self._connection.listen(wait=False)
+         operation_type = operation_type or b"empty"
+
+From ad4b63eee576d715a9b8e7057fddfb37aac13d9a Mon Sep 17 00:00:00 2001
+From: Kashif Khan <kashifkhan@microsoft.com>
+Date: Thu, 6 Jun 2024 13:27:28 -0500
+Subject: [PATCH 3/6] add on async side
+
+---
+ .../azure/servicebus/_pyamqp/aio/_client_async.py              | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/sdk/servicebus/azure-servicebus/azure/servicebus/_pyamqp/aio/_client_async.py b/sdk/servicebus/azure-servicebus/azure/servicebus/_pyamqp/aio/_client_async.py
+index 44ee70083b90a..07b1eba877432 100644
+--- a/sdk/servicebus/azure-servicebus/azure/servicebus/_pyamqp/aio/_client_async.py
++++ b/sdk/servicebus/azure-servicebus/azure/servicebus/_pyamqp/aio/_client_async.py
+@@ -387,6 +387,9 @@ async def mgmt_request_async(
+                 mgmt_link = ManagementOperation(self._session, endpoint=node, **kwargs)
+                 self._mgmt_links[node] = mgmt_link
+                 await mgmt_link.open()
++        
++        while not self.client_ready_async():
++            time.sleep(0.05)
+ 
+         while not await mgmt_link.ready():
+             await self._connection.listen(wait=False)
+
+From 1bc417b7b4e8e82d267379bfe9f9a86aa5b368e6 Mon Sep 17 00:00:00 2001
+From: Kashif Khan <kashifkhan@microsoft.com>
+Date: Thu, 6 Jun 2024 13:27:44 -0500
+Subject: [PATCH 4/6] fix log on alr
+
+---
+ .../azure/servicebus/_common/auto_lock_renewer.py           | 4 +++-
+ .../azure/servicebus/aio/_async_auto_lock_renewer.py        | 6 ++++++
+ 2 files changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/sdk/servicebus/azure-servicebus/azure/servicebus/_common/auto_lock_renewer.py b/sdk/servicebus/azure-servicebus/azure/servicebus/_common/auto_lock_renewer.py
+index 98c910fae81f2..c973911dcd4d9 100644
+--- a/sdk/servicebus/azure-servicebus/azure/servicebus/_common/auto_lock_renewer.py
++++ b/sdk/servicebus/azure-servicebus/azure/servicebus/_common/auto_lock_renewer.py
+@@ -293,7 +293,9 @@ def register(
+             )
+ 
+         _log.debug(
+-            "Running lock auto-renew for %r for %r seconds", renewable, max_lock_renewal_duration or self._max_lock_renewal_duration
++            "Running lock auto-renew for %r for %r seconds",
++            renewable,
++            max_lock_renewal_duration or self._max_lock_renewal_duration
+         )
+ 
+         self._init_workers()
+diff --git a/sdk/servicebus/azure-servicebus/azure/servicebus/aio/_async_auto_lock_renewer.py b/sdk/servicebus/azure-servicebus/azure/servicebus/aio/_async_auto_lock_renewer.py
+index 4b2875f281eca..4e72896a755b4 100644
+--- a/sdk/servicebus/azure-servicebus/azure/servicebus/aio/_async_auto_lock_renewer.py
++++ b/sdk/servicebus/azure-servicebus/azure/servicebus/aio/_async_auto_lock_renewer.py
+@@ -214,6 +214,12 @@ def register(
+             renew_period_override = (
+                 time_until_expiry.seconds * SHORT_RENEW_SCALING_FACTOR
+             )
++        
++        _log.debug(
++            "Running lock auto-renew for %r for %r seconds",
++            renewable,
++            max_lock_renewal_duration or self._max_lock_renewal_duration
++        )
+ 
+         renew_future = asyncio.ensure_future(
+             self._auto_lock_renew(
+
+From ecaf74e5753396ad737395ca178714d99b5c1bec Mon Sep 17 00:00:00 2001
+From: Kashif Khan <kashifkhan@microsoft.com>
+Date: Fri, 7 Jun 2024 12:32:13 -0500
+Subject: [PATCH 5/6] lint
+
+---
+ sdk/servicebus/azure-servicebus/CHANGELOG.md                | 2 ++
+ .../azure/servicebus/_pyamqp/aio/_client_async.py           | 2 +-
+ .../azure/servicebus/aio/_async_auto_lock_renewer.py        | 6 ------
+ 3 files changed, 3 insertions(+), 7 deletions(-)
+
+diff --git a/sdk/servicebus/azure-servicebus/CHANGELOG.md b/sdk/servicebus/azure-servicebus/CHANGELOG.md
+index 1cd62bf6e9a17..53aad7534919d 100644
+--- a/sdk/servicebus/azure-servicebus/CHANGELOG.md
++++ b/sdk/servicebus/azure-servicebus/CHANGELOG.md
+@@ -7,6 +7,8 @@
+ ### Breaking Changes
+ 
+ ### Bugs Fixed
++ 
++ - Fixed a bug where token refreshes were not happening on long running operations ([35717](https://github.com/Azure/azure-sdk-for-python/issues/35717))
+ 
+ ### Other Changes
+ 
+diff --git a/sdk/servicebus/azure-servicebus/azure/servicebus/_pyamqp/aio/_client_async.py b/sdk/servicebus/azure-servicebus/azure/servicebus/_pyamqp/aio/_client_async.py
+index 07b1eba877432..8028d6a0c3e83 100644
+--- a/sdk/servicebus/azure-servicebus/azure/servicebus/_pyamqp/aio/_client_async.py
++++ b/sdk/servicebus/azure-servicebus/azure/servicebus/_pyamqp/aio/_client_async.py
+@@ -387,7 +387,7 @@ async def mgmt_request_async(
+                 mgmt_link = ManagementOperation(self._session, endpoint=node, **kwargs)
+                 self._mgmt_links[node] = mgmt_link
+                 await mgmt_link.open()
+-        
++
+         while not self.client_ready_async():
+             time.sleep(0.05)
+ 
+diff --git a/sdk/servicebus/azure-servicebus/azure/servicebus/aio/_async_auto_lock_renewer.py b/sdk/servicebus/azure-servicebus/azure/servicebus/aio/_async_auto_lock_renewer.py
+index 4e72896a755b4..4b2875f281eca 100644
+--- a/sdk/servicebus/azure-servicebus/azure/servicebus/aio/_async_auto_lock_renewer.py
++++ b/sdk/servicebus/azure-servicebus/azure/servicebus/aio/_async_auto_lock_renewer.py
+@@ -214,12 +214,6 @@ def register(
+             renew_period_override = (
+                 time_until_expiry.seconds * SHORT_RENEW_SCALING_FACTOR
+             )
+-        
+-        _log.debug(
+-            "Running lock auto-renew for %r for %r seconds",
+-            renewable,
+-            max_lock_renewal_duration or self._max_lock_renewal_duration
+-        )
+ 
+         renew_future = asyncio.ensure_future(
+             self._auto_lock_renew(
+
+From aac1a36774d196b0b4ec9ab20542490d3f42fae8 Mon Sep 17 00:00:00 2001
+From: Kashif Khan <361477+kashifkhan@users.noreply.github.com>
+Date: Wed, 12 Jun 2024 15:32:30 -0500
+Subject: [PATCH 6/6] use asyncio sleep
+
+---
+ .../azure/servicebus/_pyamqp/aio/_client_async.py               | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/sdk/servicebus/azure-servicebus/azure/servicebus/_pyamqp/aio/_client_async.py b/sdk/servicebus/azure-servicebus/azure/servicebus/_pyamqp/aio/_client_async.py
+index 8028d6a0c3e83..d48dde9bc63ae 100644
+--- a/sdk/servicebus/azure-servicebus/azure/servicebus/_pyamqp/aio/_client_async.py
++++ b/sdk/servicebus/azure-servicebus/azure/servicebus/_pyamqp/aio/_client_async.py
+@@ -389,7 +389,7 @@ async def mgmt_request_async(
+                 await mgmt_link.open()
+ 
+         while not self.client_ready_async():
+-            time.sleep(0.05)
++            await asyncio.sleep(0.05)
+ 
+         while not await mgmt_link.ready():
+             await self._connection.listen(wait=False)
